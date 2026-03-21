@@ -108,7 +108,7 @@ pub fn is_model_cached(model_id: &str) -> bool {
     let hf_repo = internal_repo_name(model_id);
     let folder_name = hf_repo.replace("/", "--");
     let model_dir = cache_base
-        .join("matthew")
+        .join("io.github.story-essentia.matthew")
         .join("fastembed")
         .join(format!("models--{}", folder_name));
 
@@ -182,7 +182,7 @@ impl EmbedEngine {
         let model = tokio::task::spawn_blocking(move || {
             let cache_dir = dirs::cache_dir()
                 .expect("Could not determine system cache directory")
-                .join("matthew")
+                .join("io.github.story-essentia.matthew")
                 .join("fastembed");
 
             std::fs::create_dir_all(&cache_dir)
@@ -248,7 +248,7 @@ impl EmbedEngine {
         // Re-initialise with the required model (blocking, but fast if cached).
         let cache_dir = dirs::cache_dir()
             .expect("Could not determine system cache directory")
-            .join("matthew")
+            .join("io.github.story-essentia.matthew")
             .join("fastembed");
         std::fs::create_dir_all(&cache_dir)?;
 

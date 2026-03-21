@@ -33,3 +33,4 @@ src-tauri/.fastembed_cache/
 *.pem
 *.key
 .agent/
+.vscode/
