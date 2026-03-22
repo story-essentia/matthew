@@ -56,11 +56,10 @@ jobs:
           releaseName: 'Matthew ${{ github.ref_name }}'
           releaseBody: |
             See the assets below to download Matthew for your platform.
-            
+
             **Linux**: Download the `.AppImage` (portable) or `.deb` (installs system-wide)
             **Windows**: Download the `.msi` installer
             **macOS**: Download the `.dmg` file
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
-EOF
