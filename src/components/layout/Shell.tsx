@@ -29,6 +29,19 @@ export default function Shell() {
   const [exploreTopK,        setExploreTopK]        = useState(10);
   const [pendingSources,     setPendingSources]     = useState<PendingSources | null>(null);
 
+  // Synchronously wipe Explore state when switching libraries to prevent data leak
+  const [exploreLibraryDest, setExploreLibraryDest] = useState<string | null>(null);
+  const currentLibraryPath = activeLibrary?.path ?? null;
+  
+  if (currentLibraryPath !== exploreLibraryDest) {
+    setExploreLibraryDest(currentLibraryPath);
+    setExploreSearchQuery("");
+    setExploreChatQuery("");
+    setExploreResults([]);
+    setExploreChatHistory([]);
+    setPendingSources(null);
+  }
+
   const handleViewSources = (query: string, results: SearchResult[]) => {
     setPendingSources({ query, results });
     setActive("explore");
@@ -88,6 +101,7 @@ export default function Shell() {
         {/* Explore stays mounted to preserve search/chat state */}
         <div className={active === "explore" ? "h-full" : "hidden"}>
           <Explore
+            key={activeLibrary?.path ?? "empty"}
             libraryPath={activeLibrary?.path ?? null}
             searchQuery={exploreSearchQuery} setSearchQuery={setExploreSearchQuery}
             chatQuery={exploreChatQuery}     setChatQuery={setExploreChatQuery}

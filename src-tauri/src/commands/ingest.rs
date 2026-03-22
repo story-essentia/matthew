@@ -59,17 +59,6 @@ pub async fn ingest_pdfs(
         })?
     };
 
-    let (batch_size, dims) = {
-        let engine = state.embed_engine.lock().await;
-        (engine.safe_batch_size.max(1), engine.dims())
-    };
-
-    let table = ensure_chunks_table(&conn, dims).await?;
-    let extractor = PdfExtractor::new();
-    let total_files = paths.len();
-    let mut total_chunks_added   = 0usize;
-    let mut total_files_skipped  = 0usize;
-
     let mut registry = load_registry(&app)
         .await
         .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
@@ -95,6 +84,19 @@ pub async fn ingest_pdfs(
             entry.model_id.clone().unwrap_or_else(|| "BAAI/bge-m3".into())
         )
     };
+
+    let (batch_size, dims) = {
+        let mut engine = state.embed_engine.lock().await;
+        tokio::task::block_in_place(|| engine.ensure_model(&active_model_id))
+            .map_err(|e| AppError { code: "EMBED_INIT".into(), message: format!("Failed to load model: {}", e) })?;
+        (engine.safe_batch_size.max(1), engine.dims())
+    };
+
+    let table = ensure_chunks_table(&conn, dims).await?;
+    let extractor = PdfExtractor::new();
+    let total_files = paths.len();
+    let mut total_chunks_added   = 0usize;
+    let mut total_files_skipped  = 0usize;
 
 
     let emit = |p: IngestProgress| { app.emit("ingest:progress", p).ok(); };

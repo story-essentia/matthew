@@ -103,17 +103,7 @@ export default function Explore({
     }
   }, [mode]);
 
-  // Clear all Explore state when switching libraries
-  useEffect(() => {
-    setSearchQuery('');
-    setResults([]);
-    setHistoryChats([]);
-    setShowHistory(false);
-    setChatHistory([]);
-    setChatQuery('');
-    chatIdRef.current = null;
-    chatLibraryRef.current = null;
-  }, [libraryPath]);
+  // (State is cleared synchronously during render when libraryPath changes)
 
   // Auto-resize chat textarea
   useEffect(() => {

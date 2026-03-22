@@ -237,7 +237,7 @@ impl EmbedEngine {
     /// Ensure the engine has the correct model loaded for the given model_id.
     /// If a different model is currently active, re-initialise with the correct one.
     /// This is called automatically by embed_query / embed_batch.
-    fn ensure_model(&mut self, model_id: &str) -> Result<()> {
+    pub fn ensure_model(&mut self, model_id: &str) -> Result<()> {
         let needed_enum = map_model_id(model_id)?;
         let needed_tag  = format!("{:?}", needed_enum);
 
