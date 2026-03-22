@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: ubuntu-20.04
+          - platform: ubuntu-22.04
             args: ''
           - platform: windows-latest
             args: ''
@@ -37,10 +37,10 @@ jobs:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
 
       - name: Install protoc (Linux)
-        if: matrix.platform == 'ubuntu-20.04'
+        if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y protobuf-compiler libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Install protoc (macOS)
         if: matrix.platform == 'macos-latest'
@@ -57,6 +57,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ORT_STRATEGY: download
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Matthew ${{ github.ref_name }}'
