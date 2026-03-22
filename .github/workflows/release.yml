@@ -13,14 +13,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: ubuntu-22.04
+          - platform: ubuntu-20.04
             args: ''
           - platform: windows-latest
             args: ''
           - platform: macos-latest
             args: '--target aarch64-apple-darwin'
-          - platform: macos-latest
-            args: '--target x86_64-apple-darwin'
 
     runs-on: ${{ matrix.platform }}
 
@@ -36,13 +34,13 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
 
       - name: Install protoc (Linux)
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-20.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y protobuf-compiler libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Install protoc (macOS)
         if: matrix.platform == 'macos-latest'
@@ -67,7 +65,7 @@ jobs:
 
             **Linux**: Download the .AppImage (portable) or .deb (installs system-wide)
             **Windows**: Download the .msi installer
-            **macOS**: Download the .dmg file
+            **macOS**: Download the .dmg file (Apple Silicon)
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
