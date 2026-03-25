@@ -27,7 +27,7 @@ Matthew supports multiple local embedding models via [fastembed](https://github.
 
 | Model | Dimensions | Size | Best for |
 |---|---|---|---|
-| `BAAI/bge-m3` | 1024 | ~580MB | Multilingual, general purpose (default) |
+| `BAAI/bge-m3` | 1024 | 1.2GB | Multilingual, general purpose (default) |
 | `mixedbread-ai/mxbai-embed-large-v1` | 1024 | 670MB | English, high quality |
 | `lightonai/modernbert-embed-large` | 1024 | 570MB | Best new English |
 | `Snowflake/snowflake-arctic-embed-l` | 1024 | 670MB | Strong English |
@@ -36,7 +36,7 @@ Matthew supports multiple local embedding models via [fastembed](https://github.
 | `nomic-ai/nomic-embed-text-v1.5` | 768 | 270MB | Long context |
 | `Snowflake/snowflake-arctic-embed-m` | 768 | 220MB | Balanced English |
 | `BAAI/bge-base-en-v1.5` | 768 | 210MB | Solid baseline |
-| `sentence-transformers/all-MiniLM-L6-v2` | 384 | ~90MB | Lightweight, fast |
+| `sentence-transformers/all-MiniLM-L6-v2` | 384 | 90MB | Lightweight, fast |
 
 The embedding model is locked per library after the first import — switching models on existing libraries would make vectors incompatible.
 
