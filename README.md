@@ -23,16 +23,20 @@ Matthew lets you build a personal knowledge base from PDF files and explore it t
 
 ## Embedding Models
 
-Matthew supports multiple local embedding models via [fastembed](https://github.com/Anush008/fastembed-rs). You choose a model per library — it's downloaded once and cached locally in `~/.cache/huggingface/hub/`.
+Matthew supports multiple local embedding models via [fastembed](https://github.com/Anush008/fastembed-rs). You choose a model per library — it's downloaded once and cached locally in `~/.cache/io.github.story-essentia.matthew/fastembed/`.
 
 | Model | Dimensions | Size | Best for |
 |---|---|---|---|
 | `BAAI/bge-m3` | 1024 | ~580MB | Multilingual, general purpose (default) |
-| `mixedbread-ai/mxbai-embed-large-v1` | 1024 | ~560MB | English, high accuracy |
-| `nomic-ai/nomic-embed-text-v1.5` | 768 | ~270MB | English, fast |
-| `intfloat/multilingual-e5-large` | 1024 | ~560MB | Multilingual |
-| `BAAI/bge-base-en-v1.5` | 768 | ~220MB | English, lightweight |
-| `sentence-transformers/all-MiniLM-L6-v2` | 384 | ~90MB | Very fast, lower accuracy |
+| `mixedbread-ai/mxbai-embed-large-v1` | 1024 | 670MB | English, high quality |
+| `lightonai/modernbert-embed-large` | 1024 | 570MB | Best new English |
+| `Snowflake/snowflake-arctic-embed-l` | 1024 | 670MB | Strong English |
+| `Alibaba-NLP/gte-large-en-v1.5` | 1024 | 670MB | Strong English alt |
+| `intfloat/multilingual-e5-large` | 1024 | 560MB | Multilingual alt |
+| `nomic-ai/nomic-embed-text-v1.5` | 768 | 270MB | Long context |
+| `Snowflake/snowflake-arctic-embed-m` | 768 | 220MB | Balanced English |
+| `BAAI/bge-base-en-v1.5` | 768 | 210MB | Solid baseline |
+| `sentence-transformers/all-MiniLM-L6-v2` | 384 | ~90MB | Lightweight, fast |
 
 The embedding model is locked per library after the first import — switching models on existing libraries would make vectors incompatible.
 
@@ -87,7 +91,7 @@ Generates an `.AppImage` and `.deb` package in `src-tauri/target/release/bundle/
 
 ## Configuration
 
-Matthew stores settings in `~/.config/matthew/settings.json`:
+Matthew stores settings in `~/.config/io.github.story-essentia.matthew/settings.json`:
 
 ```json
 {
@@ -104,7 +108,7 @@ Libraries and their vector databases are stored wherever you choose on your file
 
 ## Features
 
-- **Multi-model embeddings** — choose your embedding model per library from six supported options
+- **Multi-model embeddings** — choose your embedding model per library from ten supported options
 - **Chunk presets** — Precise (512 chars), Balanced (2048), or Contextual (4096) chunking, locked after first import
 - **Semantic search** — cosine similarity search with configurable result count
 - **RAG chat** — retrieves relevant passages before each LLM call, conversation memory preserved within sessions
