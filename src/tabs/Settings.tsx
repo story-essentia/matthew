@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Eye, EyeOff } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
 import * as api from "@/lib/tauri";
 
 const MODELS = {
@@ -33,10 +34,32 @@ export default function Settings() {
   const [saving,    setSaving]    = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  const [modelStoragePath, setModelStoragePath] = useState<string | null>(null);
+
   useEffect(() => {
     api.getApiKey().then(k => { if (k) setApiKey(k); });
     api.getModelPreference().then(m => { if (m) setModel(m); });
+    api.getModelStoragePath().then(setModelStoragePath);
   }, []);
+
+  const handleChangeLocation = async () => {
+    const selected = await open({ directory: true, multiple: false });
+    if (selected) {
+      setSaving(true);
+      setSaveError(null);
+      try {
+        await api.saveModelStoragePath(selected as string);
+        setModelStoragePath(selected as string);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      } catch (err: unknown) {
+        const msg = (err as { message?: string })?.message ?? String(err);
+        setSaveError(msg);
+      } finally {
+        setSaving(false);
+      }
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -61,7 +84,7 @@ export default function Settings() {
     <div className="p-5 flex flex-col gap-6 max-w-lg">
       <div>
         <h2 className="text-sm font-semibold text-zinc-200">Settings</h2>
-        <p className="text-xs text-zinc-500 mt-0.5">API key and model are stored in your OS keychain.</p>
+        <p className="text-xs text-zinc-500 mt-0.5">Settings are stored locally in your Application Settings folder.</p>
       </div>
 
       {/* API key */}
@@ -114,6 +137,23 @@ export default function Settings() {
             width="12" height="12" viewBox="0 0 12 12" fill="none">
             <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
+        </div>
+      </div>
+
+      {/* Model Storage */}
+      <div className="flex flex-col gap-2">
+        <label className="text-xs font-medium text-zinc-400">Model Storage Location</label>
+        <div className="flex items-center justify-between px-3 py-2 rounded-lg border border-zinc-700 bg-[#0f0f1a]">
+          <span className="text-sm text-zinc-200 truncate pr-4">
+            {modelStoragePath ?? "Default Application Cache"}
+          </span>
+          <button
+            onClick={handleChangeLocation}
+            disabled={saving}
+            className="shrink-0 px-2 py-1 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded transition-colors disabled:opacity-50"
+          >
+            Change Location
+          </button>
         </div>
       </div>
 

@@ -2,15 +2,16 @@ use anyhow::Result;
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use serde::Serialize;
 use sysinfo::System;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 // ── Download progress event ───────────────────────────────────────────────────
 
 /// Emitted on the "model:download" channel so the frontend can show a progress UI.
 #[derive(Clone, Serialize)]
 pub struct ModelDownloadEvent {
-    pub status:  String, // "downloading" | "complete" | "error"
-    pub message: String, // human-readable, shown in the FirstRunScreen
+    pub status:   String, // "downloading" | "complete" | "error"
+    pub message:  String, // human-readable, shown in the FirstRunScreen
+    pub progress: Option<f32>, // 0.0 to 1.0
 }
 
 // ── Cache detection ───────────────────────────────────────────────────────────
@@ -48,21 +49,21 @@ pub fn internal_repo_name(model_id: &str) -> &str {
         "Alibaba-NLP/gte-large-en-v1.5"         => "Alibaba-NLP/gte-large-en-v1.5",
         "nomic-ai/nomic-embed-text-v1.5"         => "nomic-ai/nomic-embed-text-v1.5",
 
-        // Snowflake Arctic (Canonical is Snowflake/...)
+        // Snowflake Arctic (Canonical fastembed 5.x uses lowercase 'snowflake/...')
         "Snowflake/snowflake-arctic-embed-m"     |
-        "snowflake/snowflake-arctic-embed-m"     => "Snowflake/snowflake-arctic-embed-m",
+        "snowflake/snowflake-arctic-embed-m"     => "snowflake/snowflake-arctic-embed-m",
 
         "Snowflake/snowflake-arctic-embed-l"     |
-        "snowflake/snowflake-arctic-embed-l"     => "Snowflake/snowflake-arctic-embed-l",
+        "snowflake/snowflake-arctic-embed-l"     => "snowflake/snowflake-arctic-embed-l",
 
         "Snowflake/snowflake-arctic-embed-s"     |
-        "snowflake/snowflake-arctic-embed-s"     => "Snowflake/snowflake-arctic-embed-s",
+        "snowflake/snowflake-arctic-embed-s"     => "snowflake/snowflake-arctic-embed-s",
 
         "Snowflake/snowflake-arctic-embed-xs"    |
-        "snowflake/snowflake-arctic-embed-xs"    => "Snowflake/snowflake-arctic-embed-xs",
+        "snowflake/snowflake-arctic-embed-xs"    => "snowflake/snowflake-arctic-embed-xs",
 
         "Snowflake/snowflake-arctic-embed-m-long" |
-        "snowflake/snowflake-arctic-embed-m-long" => "Snowflake/snowflake-arctic-embed-m-long",
+        "snowflake/snowflake-arctic-embed-m-long" => "snowflake/snowflake-arctic-embed-m-long",
 
         // BGE Base (Canonical for fastembed-rs v5 is Xenova/...)
         "BAAI/bge-base-en-v1.5"                 |
@@ -102,21 +103,39 @@ pub fn get_model_prefixes(model_id: &str) -> (Option<&str>, Option<&str>) {
     (None, None)
 }
 
-/// Returns true if the specific ONNX model file already exists in the HF cache.
-pub fn is_model_cached(model_id: &str) -> bool {
-    let Some(cache_base) = dirs::cache_dir() else { return false };
-    let hf_repo = internal_repo_name(model_id);
-    let folder_name = hf_repo.replace("/", "--");
-    let model_dir = cache_base
+pub fn get_cache_dir(app: &AppHandle) -> std::path::PathBuf {
+    if let Ok(config_dir) = app.path().app_config_dir() {
+        let settings_path = config_dir.join("settings.json");
+        if let Ok(raw) = std::fs::read_to_string(&settings_path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if let Some(custom) = json.get("modelStoragePath").and_then(|v| v.as_str()) {
+                    let p = std::path::PathBuf::from(custom);
+                    if p.exists() {
+                        return p;
+                    }
+                }
+            }
+        }
+    }
+    
+    dirs::cache_dir()
+        .expect("Could not determine system cache directory")
         .join("io.github.story-essentia.matthew")
         .join("fastembed")
-        .join(format!("models--{}", folder_name));
+}
+
+/// Returns true if the specific ONNX model file already exists in the HF cache.
+pub fn is_model_cached(model_id: &str, app: &AppHandle) -> bool {
+    let cache_base = get_cache_dir(app);
+    let hf_repo = internal_repo_name(model_id);
+    let folder_name = hf_repo.replace("/", "--");
+    let model_dir = cache_base.join(format!("models--{}", folder_name));
 
     model_dir.exists() && model_dir.join("snapshots").exists()
 }
 
-pub fn is_bgem3_cached() -> bool {
-    is_model_cached("BAAI/bge-m3")
+pub fn is_bgem3_cached(app: &AppHandle) -> bool {
+    is_model_cached("BAAI/bge-m3", app)
 }
 
 /// Map our UI model ID to the fastembed enum.
@@ -125,11 +144,11 @@ pub fn map_model_id(model_id: &str) -> anyhow::Result<EmbeddingModel> {
         "BAAI/bge-m3"                           => Ok(EmbeddingModel::BGEM3),
         "mixedbread-ai/mxbai-embed-large-v1"    => Ok(EmbeddingModel::MxbaiEmbedLargeV1),
         "lightonai/modernbert-embed-large"       => Ok(EmbeddingModel::ModernBertEmbedLarge),
-        "Snowflake/snowflake-arctic-embed-l"     => Ok(EmbeddingModel::SnowflakeArcticEmbedL),
-        "Snowflake/snowflake-arctic-embed-m"     => Ok(EmbeddingModel::SnowflakeArcticEmbedM),
-        "Snowflake/snowflake-arctic-embed-s"     => Ok(EmbeddingModel::SnowflakeArcticEmbedS),
-        "Snowflake/snowflake-arctic-embed-xs"    => Ok(EmbeddingModel::SnowflakeArcticEmbedXS),
-        "Snowflake/snowflake-arctic-embed-m-long" => Ok(EmbeddingModel::SnowflakeArcticEmbedMLong),
+        "snowflake/snowflake-arctic-embed-l"     => Ok(EmbeddingModel::SnowflakeArcticEmbedL),
+        "snowflake/snowflake-arctic-embed-m"     => Ok(EmbeddingModel::SnowflakeArcticEmbedM),
+        "snowflake/snowflake-arctic-embed-s"     => Ok(EmbeddingModel::SnowflakeArcticEmbedS),
+        "snowflake/snowflake-arctic-embed-xs"    => Ok(EmbeddingModel::SnowflakeArcticEmbedXS),
+        "snowflake/snowflake-arctic-embed-m-long" => Ok(EmbeddingModel::SnowflakeArcticEmbedMLong),
         "BAAI/bge-base-en-v1.5"                 |
         "Xenova/bge-base-en-v1.5"               => Ok(EmbeddingModel::BGEBaseENV15),
 
@@ -152,13 +171,14 @@ pub struct EmbedEngine {
     active_model_id: Option<String>,        // tracks which model is currently loaded
     dims:            usize,
     pub safe_batch_size: usize,
+    app:             AppHandle,
 }
 
 impl EmbedEngine {
     /// Cheap placeholder stored in AppState while async init is in progress.
     /// Any call to embed_batch/embed_query while the model is None returns an error.
-    pub fn placeholder() -> Self {
-        Self { model: None, active_model_id: None, dims: 0, safe_batch_size: 0 }
+    pub fn placeholder(app: AppHandle) -> Self {
+        Self { model: None, active_model_id: None, dims: 0, safe_batch_size: 0, app }
     }
 
     /// Initialise an embedding model, emitting Tauri events so the frontend can drive a
@@ -167,44 +187,124 @@ impl EmbedEngine {
     /// `TextEmbedding::try_new` is synchronous and **blocking** — it is run
     /// inside `spawn_blocking` so we never park the async runtime.
     pub async fn new_with_progress(app: AppHandle, model_enum: EmbeddingModel) -> Result<Self> {
-        // Signal the frontend immediately so it can switch to the download UI.
-        app.emit(
-            "model:download",
-            ModelDownloadEvent {
-                status:  "downloading".into(),
-                message: format!("Preparing model... This only happens once and enables fully offline search."),
-            },
-        )
-        .ok();
+        // 1. Identify which model string we're downloading to map to internal repo name
+        let model_id = match model_enum {
+            EmbeddingModel::BGEM3 => "BAAI/bge-m3",
+            EmbeddingModel::MxbaiEmbedLargeV1 => "mixedbread-ai/mxbai-embed-large-v1",
+            EmbeddingModel::ModernBertEmbedLarge => "lightonai/modernbert-embed-large",
+            EmbeddingModel::SnowflakeArcticEmbedL => "snowflake/snowflake-arctic-embed-l",
+            EmbeddingModel::SnowflakeArcticEmbedM => "snowflake/snowflake-arctic-embed-m",
+            EmbeddingModel::SnowflakeArcticEmbedS => "snowflake/snowflake-arctic-embed-s",
+            EmbeddingModel::SnowflakeArcticEmbedXS => "snowflake/snowflake-arctic-embed-xs",
+            EmbeddingModel::SnowflakeArcticEmbedMLong => "snowflake/snowflake-arctic-embed-m-long",
+            EmbeddingModel::BGEBaseENV15 => "BAAI/bge-base-en-v1.5",
+            EmbeddingModel::AllMiniLML6V2 => "sentence-transformers/all-MiniLM-L6-v2",
+            EmbeddingModel::MultilingualE5Large => "intfloat/multilingual-e5-large",
+            EmbeddingModel::GTELargeENV15 => "Alibaba-NLP/gte-large-en-v1.5",
+            EmbeddingModel::NomicEmbedTextV15 => "nomic-ai/nomic-embed-text-v1.5",
+            _ => "BAAI/bge-m3",
+        };
+
+        let cached = is_model_cached(model_id, &app);
+
+        if !cached {
+            // Signal the frontend immediately so it can switch to the download UI.
+            app.emit(
+                "model:download",
+                ModelDownloadEvent {
+                    status:  "downloading".into(),
+                    message: format!("Preparing model... This only happens once and enables fully offline search."),
+                    progress: None,
+                },
+            )
+            .ok();
+        }
+
+        let expected_bytes = match model_id {
+            "BAAI/bge-m3" => 1_200_000_000,
+            "mixedbread-ai/mxbai-embed-large-v1" => 670_000_000,
+            "lightonai/modernbert-embed-large" => 570_000_000,
+            "snowflake/snowflake-arctic-embed-l" => 670_000_000,
+            "Alibaba-NLP/gte-large-en-v1.5" => 670_000_000,
+            "intfloat/multilingual-e5-large" => 560_000_000,
+            "nomic-ai/nomic-embed-text-v1.5" => 270_000_000,
+            "snowflake/snowflake-arctic-embed-m" => 220_000_000,
+            "BAAI/bge-base-en-v1.5" => 210_000_000,
+            "sentence-transformers/all-MiniLM-L6-v2" => 90_000_000,
+            _ => 1_200_000_000,
+        };
+
+        let hf_repo = internal_repo_name(model_id);
+        let folder_name = hf_repo.replace("/", "--");
+        let cache_dir = get_cache_dir(&app);
+        let model_dir = cache_dir.join(format!("models--{}", folder_name));
+
+        // Start a monitoring task to track directory size
+        let app_monitor = app.clone();
+        let model_dir_monitor = model_dir.clone();
+        let stop_monitor = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_monitor_clone = stop_monitor.clone();
+
+        if !cached {
+            tokio::spawn(async move {
+                let mut last_progress = 0.0;
+                while !stop_monitor_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+                    
+                    if model_dir_monitor.exists() {
+                        let current_size = get_recursive_size(&model_dir_monitor).unwrap_or(0);
+                        let progress = (current_size as f32 / expected_bytes as f32).min(0.99);
+                        
+                        // Only emit if progress moved forward meaningfully
+                        if progress > last_progress + 0.01 {
+                            last_progress = progress;
+                            app_monitor.emit(
+                                "model:download",
+                                ModelDownloadEvent {
+                                    status: "downloading".into(),
+                                    message: format!("Downloading model files..."),
+                                    progress: Some(progress),
+                                },
+                            ).ok();
+                        }
+                    }
+                }
+            });
+        }
 
         // Run the blocking ONNX initialisation on a dedicated thread.
         let m_copy = model_enum.clone();
-        let model = tokio::task::spawn_blocking(move || {
-            let cache_dir = dirs::cache_dir()
-                .expect("Could not determine system cache directory")
-                .join("io.github.story-essentia.matthew")
-                .join("fastembed");
-
-            std::fs::create_dir_all(&cache_dir)
+        let cache_dir_init = cache_dir.clone();
+        
+        let model_res = tokio::task::spawn_blocking(move || {
+            std::fs::create_dir_all(&cache_dir_init)
                 .expect("Could not create cache directory");
 
             TextEmbedding::try_new(
                 InitOptions::new(m_copy)
-                    .with_cache_dir(cache_dir)
+                    .with_cache_dir(cache_dir_init)
                     .with_show_download_progress(true),
             )
         })
         .await
-        .map_err(|e| anyhow::anyhow!("embed thread panicked: {}", e))??;
+        .map_err(|e| anyhow::anyhow!("embed thread panicked: {}", e))?;
 
-        app.emit(
-            "model:download",
-            ModelDownloadEvent {
-                status:  "complete".into(),
-                message: "Model ready.".into(),
-            },
-        )
-        .ok();
+        // Stop the monitor
+        stop_monitor.store(true, std::sync::atomic::Ordering::Relaxed);
+
+        let model = model_res?;
+
+        if !cached {
+            app.emit(
+                "model:download",
+                ModelDownloadEvent {
+                    status:  "complete".into(),
+                    message: "Model ready.".into(),
+                    progress: Some(1.0),
+                },
+            )
+            .ok();
+        }
 
         let dims = match model_enum {
             EmbeddingModel::BGEM3                 |
@@ -231,6 +331,7 @@ impl EmbedEngine {
             active_model_id: Some(format!("{:?}", model_enum)),
             dims,
             safe_batch_size: Self::compute_batch_size(),
+            app,
         })
     }
 
@@ -246,10 +347,7 @@ impl EmbedEngine {
         }
 
         // Re-initialise with the required model (blocking, but fast if cached).
-        let cache_dir = dirs::cache_dir()
-            .expect("Could not determine system cache directory")
-            .join("io.github.story-essentia.matthew")
-            .join("fastembed");
+        let cache_dir = get_cache_dir(&self.app);
         std::fs::create_dir_all(&cache_dir)?;
 
         let new_model = TextEmbedding::try_new(
@@ -336,4 +434,22 @@ impl EmbedEngine {
     pub fn dims(&self) -> usize {
         self.dims
     }
+}
+
+fn get_recursive_size(path: &std::path::Path) -> std::io::Result<u64> {
+    let mut size = 0;
+    if path.is_dir() {
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                size += get_recursive_size(&path)?;
+            } else {
+                size += entry.metadata()?.len();
+            }
+        }
+    } else {
+        size = path.metadata()?.len();
+    }
+    Ok(size)
 }

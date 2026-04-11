@@ -98,6 +98,7 @@ export interface IngestProgress {
 export interface ModelDownloadEvent {
   status:  "downloading" | "complete" | "error";
   message: string;
+  progress?: number;
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────────────

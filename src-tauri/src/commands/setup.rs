@@ -26,7 +26,7 @@ pub struct ModelInfo {
 }
 
 #[tauri::command]
-pub async fn list_embedding_models() -> Vec<ModelInfo> {
+pub async fn list_embedding_models(app: tauri::AppHandle) -> Vec<ModelInfo> {
     vec![
         ModelInfo {
             id:           "BAAI/bge-m3".into(),
@@ -39,7 +39,7 @@ pub async fn list_embedding_models() -> Vec<ModelInfo> {
             recommended:  true,
             is_new:       false,
             is_fast:      false,
-            cached:       crate::embed::engine::is_model_cached("BAAI/bge-m3"),
+            cached:       crate::embed::engine::is_model_cached("BAAI/bge-m3", &app),
         },
         ModelInfo {
             id:           "mixedbread-ai/mxbai-embed-large-v1".into(),
@@ -52,7 +52,7 @@ pub async fn list_embedding_models() -> Vec<ModelInfo> {
             recommended:  false,
             is_new:       false,
             is_fast:      false,
-            cached:       crate::embed::engine::is_model_cached("mixedbread-ai/mxbai-embed-large-v1"),
+            cached:       crate::embed::engine::is_model_cached("mixedbread-ai/mxbai-embed-large-v1", &app),
         },
         ModelInfo {
             id:           "lightonai/modernbert-embed-large".into(),
@@ -65,7 +65,7 @@ pub async fn list_embedding_models() -> Vec<ModelInfo> {
             recommended:  false,
             is_new:       true,
             is_fast:      false,
-            cached:       crate::embed::engine::is_model_cached("lightonai/modernbert-embed-large"),
+            cached:       crate::embed::engine::is_model_cached("lightonai/modernbert-embed-large", &app),
         },
         ModelInfo {
             id:           "Snowflake/snowflake-arctic-embed-l".into(),
@@ -78,7 +78,7 @@ pub async fn list_embedding_models() -> Vec<ModelInfo> {
             recommended:  false,
             is_new:       false,
             is_fast:      false,
-            cached:       crate::embed::engine::is_model_cached("Snowflake/snowflake-arctic-embed-l"),
+            cached:       crate::embed::engine::is_model_cached("Snowflake/snowflake-arctic-embed-l", &app),
         },
         ModelInfo {
             id:           "Alibaba-NLP/gte-large-en-v1.5".into(),
@@ -91,7 +91,7 @@ pub async fn list_embedding_models() -> Vec<ModelInfo> {
             recommended:  false,
             is_new:       false,
             is_fast:      false,
-            cached:       crate::embed::engine::is_model_cached("Alibaba-NLP/gte-large-en-v1.5"),
+            cached:       crate::embed::engine::is_model_cached("Alibaba-NLP/gte-large-en-v1.5", &app),
         },
         ModelInfo {
             id:           "intfloat/multilingual-e5-large".into(),
@@ -104,7 +104,7 @@ pub async fn list_embedding_models() -> Vec<ModelInfo> {
             recommended:  false,
             is_new:       false,
             is_fast:      false,
-            cached:       crate::embed::engine::is_model_cached("intfloat/multilingual-e5-large"),
+            cached:       crate::embed::engine::is_model_cached("intfloat/multilingual-e5-large", &app),
         },
         ModelInfo {
             id:           "nomic-ai/nomic-embed-text-v1.5".into(),
@@ -117,7 +117,7 @@ pub async fn list_embedding_models() -> Vec<ModelInfo> {
             recommended:  false,
             is_new:       false,
             is_fast:      false,
-            cached:       crate::embed::engine::is_model_cached("nomic-ai/nomic-embed-text-v1.5"),
+            cached:       crate::embed::engine::is_model_cached("nomic-ai/nomic-embed-text-v1.5", &app),
         },
         ModelInfo {
             id:           "Snowflake/snowflake-arctic-embed-m".into(),
@@ -130,7 +130,7 @@ pub async fn list_embedding_models() -> Vec<ModelInfo> {
             recommended:  false,
             is_new:       false,
             is_fast:      false,
-            cached:       crate::embed::engine::is_model_cached("Snowflake/snowflake-arctic-embed-m"),
+            cached:       crate::embed::engine::is_model_cached("Snowflake/snowflake-arctic-embed-m", &app),
         },
         ModelInfo {
             id:           "BAAI/bge-base-en-v1.5".into(),
@@ -143,7 +143,7 @@ pub async fn list_embedding_models() -> Vec<ModelInfo> {
             recommended:  false,
             is_new:       false,
             is_fast:      false,
-            cached:       crate::embed::engine::is_model_cached("BAAI/bge-base-en-v1.5"),
+            cached:       crate::embed::engine::is_model_cached("BAAI/bge-base-en-v1.5", &app),
         },
         ModelInfo {
             id:           "sentence-transformers/all-MiniLM-L6-v2".into(),
@@ -156,7 +156,7 @@ pub async fn list_embedding_models() -> Vec<ModelInfo> {
             recommended:  false,
             is_new:       false,
             is_fast:      true,
-            cached:       crate::embed::engine::is_model_cached("sentence-transformers/all-MiniLM-L6-v2"),
+            cached:       crate::embed::engine::is_model_cached("sentence-transformers/all-MiniLM-L6-v2", &app),
         },
     ]
 }
@@ -165,9 +165,9 @@ pub async fn list_embedding_models() -> Vec<ModelInfo> {
 
 /// Check whether the BGE-M3 model is already cached on disk.
 #[tauri::command]
-pub async fn get_setup_status() -> SetupStatus {
+pub async fn get_setup_status(app: tauri::AppHandle) -> SetupStatus {
     SetupStatus {
-        model_cached: is_bgem3_cached(),
+        model_cached: is_bgem3_cached(&app),
     }
 }
 
@@ -180,7 +180,7 @@ pub async fn initialize_embedding_model(
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<(), crate::AppError> {
     // Only initialize if already on disk. This prevents auto-download on mount/tab-switch.
-    if !crate::embed::engine::is_model_cached(&model_id) {
+    if !crate::embed::engine::is_model_cached(&model_id, &app) {
         return Ok(());
     }
     let model = crate::embed::engine::map_model_id(&model_id)?;

@@ -151,6 +151,14 @@ export function getModelPreference(): Promise<string | null> {
   return invoke<string | null>("get_model_preference");
 }
 
+export function saveModelStoragePath(path: string): Promise<void> {
+  return invoke<void>("save_model_storage_path", { path });
+}
+
+export function getModelStoragePath(): Promise<string | null> {
+  return invoke<string | null>("get_model_storage_path");
+}
+
 // ── Event listeners ───────────────────────────────────────────────────────────
 
 export function onModelDownload(
