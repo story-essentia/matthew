@@ -4,7 +4,17 @@ import { useLibraries } from "@/hooks/useLibraries";
 import { ChunkPresetSelector } from "@/components/shared/ChunkPresetSelector";
 import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
-import { listEmbeddingModels, downloadEmbeddingModel, initializeEmbeddingModel, getSetupStatus, onModelDownload, type ModelInfo } from '@/lib/tauri';
+import { open } from "@tauri-apps/plugin-dialog";
+import { 
+  listEmbeddingModels, 
+  downloadEmbeddingModel, 
+  initializeEmbeddingModel, 
+  getSetupStatus, 
+  onModelDownload, 
+  getModelStoragePath,
+  saveModelStoragePath,
+  type ModelInfo 
+} from '@/lib/tauri';
 
 const phaseLabel: Record<string, string> = {
   parsing:   "Reading PDF…",
@@ -20,6 +30,39 @@ export default function Import() {
   const { activeLibrary, setLibraryPreset, setLibraryModel, refreshLibraries } = useLibraries();
   const { fileStatuses, progress, isIngesting, selectFiles, selectFolder, startIngest, clearFiles } = useIngest();
 
+  const handleDownload = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    let currentPath = modelStoragePath;
+    if (!currentPath) {
+      const selected = await open({ directory: true, multiple: false });
+      if (!selected) return; // User cancelled
+      await saveModelStoragePath(selected as string);
+      setModelStoragePath(selected as string);
+    }
+    
+    setIsDownloading(true);
+    setDownloadProgress(0);
+    downloadEmbeddingModel(selectedModelId)
+      .then(() => {
+        setIsDownloading(false);
+        setDownloadProgress(100);
+      })
+      .catch(err => {
+        setIsDownloading(false);
+        setDownloadProgress(0);
+        setDownloadMessage(String(err));
+      });
+  };
+
+  const handleChangeLocation = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const selected = await open({ directory: true, multiple: false });
+    if (selected) {
+      await saveModelStoragePath(selected as string);
+      setModelStoragePath(selected as string);
+    }
+  };
+
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string>('BAAI/bge-m3');
   const [isDownloading, setIsDownloading] = useState(false);
@@ -27,6 +70,8 @@ export default function Import() {
   const [downloadProgress, setDownloadProgress] = useState(0); // 0-100, estimated
   const [anyModelCached, setAnyModelCached] = useState<boolean>(true); // optimistic
   const [pickerExpanded, setPickerExpanded] = useState(false);
+
+  const [modelStoragePath, setModelStoragePath] = useState<string | null>(null);
 
   useEffect(() => {
     if (progress?.phase === "done" && !isIngesting) {
@@ -39,6 +84,7 @@ export default function Import() {
   useEffect(() => {
     listEmbeddingModels().then(setModels);
     getSetupStatus().then(result => setAnyModelCached(result.modelCached));
+    getModelStoragePath().then(setModelStoragePath);
   }, []);
 
   useEffect(() => {
@@ -51,7 +97,6 @@ export default function Import() {
     // Load pinned model if it exists
     if (activeLibrary.modelId) {
       setSelectedModelId(activeLibrary.modelId);
-      initializeEmbeddingModel(activeLibrary.modelId).catch(console.error);
     } else {
       setSelectedModelId('BAAI/bge-m3');
     }
@@ -60,11 +105,11 @@ export default function Import() {
   useEffect(() => {
     // Listen for background download events via the tauri.ts wrapper
     const unlistenPromise = onModelDownload((payload) => {
-      const { status, message } = payload;
+      const { status, message, progress } = payload;
       if (status === 'downloading') {
         setIsDownloading(true);
         setDownloadMessage(message);
-        setDownloadProgress(10); // pulse to show activity
+        if (progress !== undefined) setDownloadProgress(progress * 100);
       } else if (status === 'complete') {
         setIsDownloading(false);
         setDownloadProgress(100);
@@ -375,11 +420,6 @@ export default function Import() {
                       if (activeLibrary && !activeLibrary.hasBeenIngested && !isIngesting) {
                         setLibraryModel(activeLibrary.id, model.id)
                           .catch(console.error);
-                        
-                        // If it's already cached, initialize it in the engine immediately
-                        if (model.cached) {
-                          initializeEmbeddingModel(model.id).catch(console.error);
-                        }
                       }
                     }}
                     className={cn(
@@ -484,31 +524,33 @@ export default function Import() {
                 </div>
               ) : (
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-[11px] text-zinc-600">
-                    {(() => {
-                      const sel = models.find(m => m.id === selectedModelId);
-                      if (!sel) return '';
-                      return sel.cached
-                        ? `${sel.displayName} is ready to use`
-                        : `${sel.displayName} · requires internet once`;
-                    })()}
-                  </p>
+                  <div className="flex flex-col gap-1 text-[11px] text-zinc-600">
+                    <p>
+                      {(() => {
+                        const sel = models.find(m => m.id === selectedModelId);
+                        if (!sel) return '';
+                        return sel.cached
+                          ? `${sel.displayName} is ready to use`
+                          : `${sel.displayName} · requires internet once`;
+                      })()}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <span className="truncate max-w-[200px]" title={modelStoragePath ?? 'Default Path'}>
+                        Save to: {modelStoragePath ?? 'Default'}
+                      </span>
+                      <button 
+                        onClick={handleChangeLocation} 
+                        className="text-indigo-400 hover:text-indigo-300 underline font-medium">
+                        Change Location
+                      </button>
+                    </div>
+                  </div>
                   {(() => {
                     const sel = models.find(m => m.id === selectedModelId);
                     if (sel?.cached) return null;
                     return (
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setIsDownloading(true);
-                          setDownloadProgress(5);
-                          downloadEmbeddingModel(selectedModelId)
-                            .catch(err => {
-                              setIsDownloading(false);
-                              setDownloadProgress(0);
-                              setDownloadMessage(String(err));
-                            });
-                        }}
+                        onClick={handleDownload}
                         disabled={isDownloading}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50">
                         <Download size={11} />

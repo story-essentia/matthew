@@ -20,6 +20,8 @@ struct AppSettings {
     api_key: Option<String>,
     #[serde(default)]
     model:   Option<String>,
+    #[serde(default)]
+    model_storage_path: Option<String>,
 }
 
 fn settings_path(app: &AppHandle) -> Result<std::path::PathBuf, AppError> {
@@ -50,6 +52,40 @@ fn save_settings(app: &AppHandle, settings: &AppSettings) -> Result<(), AppError
         .map_err(|e| AppError { code: "SETTINGS_SERIALIZE".into(), message: e.to_string() })?;
     std::fs::write(&path, json)
         .map_err(|e| AppError { code: "SETTINGS_WRITE".into(), message: e.to_string() })
+}
+
+// ── Model Storage Path ────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn save_model_storage_path(path: String, app: AppHandle) -> Result<(), AppError> {
+    if !path.trim().is_empty() {
+        let p = std::path::Path::new(&path);
+        if !p.exists() {
+            std::fs::create_dir_all(p).map_err(|e| AppError {
+                code: "DIR_CREATE".into(),
+                message: format!("Failed to create model directory: {}", e),
+            })?;
+        }
+        let metadata = std::fs::metadata(p).map_err(|e| AppError {
+            code: "DIR_ACCESS".into(),
+            message: format!("Cannot access model directory: {}", e),
+        })?;
+        if metadata.permissions().readonly() {
+            return Err(AppError {
+                code: "DIR_READONLY".into(),
+                message: "Selected model directory is read-only.".into(),
+            });
+        }
+    }
+
+    let mut settings = load_settings(&app)?;
+    settings.model_storage_path = if path.trim().is_empty() { None } else { Some(path) };
+    save_settings(&app, &settings)
+}
+
+#[tauri::command]
+pub async fn get_model_storage_path(app: AppHandle) -> Result<Option<String>, AppError> {
+    Ok(load_settings(&app)?.model_storage_path)
 }
 
 // ── Chat types ────────────────────────────────────────────────────────────────
