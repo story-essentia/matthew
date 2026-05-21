@@ -31,7 +31,7 @@ fn settings_path(app: &AppHandle) -> Result<std::path::PathBuf, AppError> {
         .map_err(|e| AppError { code: "PATH".into(), message: e.to_string() })
 }
 
-fn load_settings(app: &AppHandle) -> Result<AppSettings, AppError> {
+fn load_settings_unlocked(app: &AppHandle) -> Result<AppSettings, AppError> {
     let path = settings_path(app)?;
     if !path.exists() {
         return Ok(AppSettings::default());
@@ -42,7 +42,7 @@ fn load_settings(app: &AppHandle) -> Result<AppSettings, AppError> {
         .map_err(|e| AppError { code: "SETTINGS_PARSE".into(), message: e.to_string() })
 }
 
-fn save_settings(app: &AppHandle, settings: &AppSettings) -> Result<(), AppError> {
+fn save_settings_unlocked(app: &AppHandle, settings: &AppSettings) -> Result<(), AppError> {
     let path = settings_path(app)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -54,10 +54,33 @@ fn save_settings(app: &AppHandle, settings: &AppSettings) -> Result<(), AppError
         .map_err(|e| AppError { code: "SETTINGS_WRITE".into(), message: e.to_string() })
 }
 
+fn load_settings(app: &AppHandle) -> Result<AppSettings, AppError> {
+    let state_opt = app.try_state::<AppState>();
+    let _guard = match &state_opt {
+        Some(state) => Some(state.settings_lock.lock().unwrap()),
+        None => None,
+    };
+    load_settings_unlocked(app)
+}
+
+#[allow(dead_code)]
+fn save_settings(app: &AppHandle, settings: &AppSettings) -> Result<(), AppError> {
+    let state_opt = app.try_state::<AppState>();
+    let _guard = match &state_opt {
+        Some(state) => Some(state.settings_lock.lock().unwrap()),
+        None => None,
+    };
+    save_settings_unlocked(app, settings)
+}
+
 // ── Model Storage Path ────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn save_model_storage_path(path: String, app: AppHandle) -> Result<(), AppError> {
+pub async fn save_model_storage_path(
+    path: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
     if !path.trim().is_empty() {
         let p = std::path::Path::new(&path);
         if !p.exists() {
@@ -78,9 +101,10 @@ pub async fn save_model_storage_path(path: String, app: AppHandle) -> Result<(),
         }
     }
 
-    let mut settings = load_settings(&app)?;
+    let _guard = state.settings_lock.lock().unwrap();
+    let mut settings = load_settings_unlocked(&app)?;
     settings.model_storage_path = if path.trim().is_empty() { None } else { Some(path) };
-    save_settings(&app, &settings)
+    save_settings_unlocked(&app, &settings)
 }
 
 #[tauri::command]
@@ -152,7 +176,7 @@ pub async fn search_chunks(
 
     // Embed the query — acquire lock, run in block_in_place, release immediately.
     let (query_vec, dims) = {
-        let registry = crate::commands::libraries::load_registry(&app).await
+        let registry = crate::commands::libraries::load_registry(&app)
             .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
         
         let mid = registry.iter()
@@ -267,10 +291,15 @@ pub async fn chat_completion(
 
 /// Save the OpenRouter API key to settings.json.
 #[tauri::command]
-pub async fn save_api_key(key: String, app: AppHandle) -> Result<(), AppError> {
-    let mut settings = load_settings(&app)?;
+pub async fn save_api_key(
+    key: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let _guard = state.settings_lock.lock().unwrap();
+    let mut settings = load_settings_unlocked(&app)?;
     settings.api_key = if key.trim().is_empty() { None } else { Some(key) };
-    save_settings(&app, &settings)
+    save_settings_unlocked(&app, &settings)
 }
 
 /// Retrieve the OpenRouter API key. Returns `None` if not set.
@@ -283,10 +312,15 @@ pub async fn get_api_key(app: AppHandle) -> Result<Option<String>, AppError> {
 
 /// Save the preferred OpenRouter model identifier to settings.json.
 #[tauri::command]
-pub async fn save_model_preference(model: String, app: AppHandle) -> Result<(), AppError> {
-    let mut settings = load_settings(&app)?;
+pub async fn save_model_preference(
+    model: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let _guard = state.settings_lock.lock().unwrap();
+    let mut settings = load_settings_unlocked(&app)?;
     settings.model = if model.trim().is_empty() { None } else { Some(model) };
-    save_settings(&app, &settings)
+    save_settings_unlocked(&app, &settings)
 }
 
 /// Retrieve the preferred model. Returns `None` if not set.

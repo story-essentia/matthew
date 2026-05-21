@@ -12,6 +12,7 @@ use tauri::Manager;
 async fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -19,6 +20,8 @@ async fn main() {
                 embed_engine:       Arc::new(Mutex::new(EmbedEngine::placeholder(handle.clone()))),
                 active_db:          Arc::new(RwLock::new(None)),
                 active_library_id:  Arc::new(RwLock::new(None)),
+                settings_lock:      std::sync::Mutex::new(()),
+                registry_lock:      std::sync::Mutex::new(()),
             });
 
             // Only initialize EmbedEngine on startup if BGE-M3 is already cached.

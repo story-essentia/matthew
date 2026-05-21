@@ -106,7 +106,15 @@ pub fn get_model_prefixes(model_id: &str) -> (Option<&str>, Option<&str>) {
 pub fn get_cache_dir(app: &AppHandle) -> std::path::PathBuf {
     if let Ok(config_dir) = app.path().app_config_dir() {
         let settings_path = config_dir.join("settings.json");
-        if let Ok(raw) = std::fs::read_to_string(&settings_path) {
+        let raw_opt = {
+            let state_opt = app.try_state::<crate::AppState>();
+            let _guard = match &state_opt {
+                Some(state) => Some(state.settings_lock.lock().unwrap()),
+                None => None,
+            };
+            std::fs::read_to_string(&settings_path).ok()
+        };
+        if let Some(raw) = raw_opt {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) {
                 if let Some(custom) = json.get("modelStoragePath").and_then(|v| v.as_str()) {
                     let p = std::path::PathBuf::from(custom);

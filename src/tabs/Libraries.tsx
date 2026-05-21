@@ -20,17 +20,21 @@ function IngestedDocsList({ libraryId }: { libraryId: string }) {
   const [files, setFiles]             = useState<IngestedFile[] | null>(null);
 
   const toggle = useCallback(async () => {
-    if (!expanded && files === null) {
+    const nextExpanded = !expanded;
+    setExpanded(nextExpanded);
+
+    if (nextExpanded && files === null && !loading) {
       setLoading(true);
       try {
         const result = await api.listIngestedFiles(libraryId);
         setFiles(result);
+      } catch (err) {
+        console.error("Failed to load documents:", err);
       } finally {
         setLoading(false);
       }
     }
-    setExpanded(v => !v);
-  }, [expanded, files, libraryId]);
+  }, [expanded, files, libraryId, loading]);
 
   const count = files?.length ?? 0;
   const visible = showAll ? (files ?? []) : (files ?? []).slice(0, MAX_VISIBLE);
@@ -44,23 +48,26 @@ function IngestedDocsList({ libraryId }: { libraryId: string }) {
         {expanded
           ? <ChevronDown size={11} className="shrink-0" />
           : <ChevronRight size={11} className="shrink-0" />}
-        {loading ? "Loading…" : files === null ? "Documents" : `${count} document${count !== 1 ? "s" : ""}`}
+        {files === null ? "Documents" : `${count} document${count !== 1 ? "s" : ""}`}
       </button>
 
       {expanded && (
-        <div className="pb-2 px-3 flex flex-col gap-0.5">
-          {files !== null && files.length === 0 && (
+        <div className="pb-2 px-3 flex flex-col gap-0.5 max-h-60 overflow-y-auto custom-scrollbar">
+          {loading && (
+            <p className="text-xs text-zinc-500 py-1 animate-pulse">Loading documents…</p>
+          )}
+          {!loading && files !== null && files.length === 0 && (
             <p className="text-xs text-zinc-700 py-1">No documents imported yet</p>
           )}
-          {visible.map(f => (
+          {!loading && files !== null && visible.map(f => (
             <div key={f.sourceFile}
               className="flex items-center gap-2 py-1 text-xs">
               <FileText size={11} className="shrink-0 text-zinc-700" />
-              <span className="truncate text-zinc-400 flex-1">{f.sourceFile}</span>
+              <span className="truncate text-zinc-400 flex-1" title={f.sourceFile}>{f.sourceFile}</span>
               <span className="shrink-0 text-zinc-700">{f.chunkCount.toLocaleString()} chunks</span>
             </div>
           ))}
-          {!showAll && files !== null && files.length > MAX_VISIBLE && (
+          {!loading && !showAll && files !== null && files.length > MAX_VISIBLE && (
             <button
               onClick={() => setShowAll(true)}
               className="text-xs text-indigo-500 hover:text-indigo-400 text-left py-1 transition-colors"
