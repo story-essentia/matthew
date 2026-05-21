@@ -23,6 +23,12 @@ pub struct AppState {
 
     /// ID of the currently open library. None = no library selected.
     pub active_library_id: Arc<RwLock<Option<String>>>,
+
+    /// Mutex for synchronizing access to settings.json.
+    pub settings_lock: std::sync::Mutex<()>,
+
+    /// Mutex for synchronizing access to libraries.json registry.
+    pub registry_lock: std::sync::Mutex<()>,
 }
 
 // ── AppError ──────────────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ use crate::{
     AppError, AppState,
     db::store::{ensure_chunks_table, insert_chunks, create_vector_index, ChunkRecord},
     pdf::extractor::{chunk_page_text, file_sha256, PdfExtractor},
-    commands::libraries::{load_registry, save_registry},
+    commands::libraries::{load_registry_unlocked, save_registry_unlocked},
 };
 
 // ── IngestProgress event ──────────────────────────────────────────────────────
@@ -59,10 +59,6 @@ pub async fn ingest_pdfs(
         })?
     };
 
-    let mut registry = load_registry(&app)
-        .await
-        .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
-
     // ── 2. Identify the active library and read its preset settings ──────────
     let active_id = state.active_library_id.read().await.clone()
         .ok_or(AppError {
@@ -70,8 +66,12 @@ pub async fn ingest_pdfs(
             message: "No active library.".into(),
         })?;
 
-    // Read chunk settings in a short scope — borrow of registry ends here.
+    // Read chunk settings in a short atomic scope — registry file is loaded, read, and dropped immediately.
     let (chunk_chars, overlap_chars, active_model_id) = {
+        let _guard = state.registry_lock.lock().unwrap();
+        let registry = load_registry_unlocked(&app)
+            .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+
         let entry = registry.iter()
             .find(|l| l.id == active_id)
             .ok_or(AppError {
@@ -132,8 +132,12 @@ pub async fn ingest_pdfs(
             }
         };
 
-        // Short borrow to check the hash list — dropped before any mutation.
+        // Short borrow to check the hash list — loaded, checked, and dropped immediately under lock.
         let already_ingested = {
+            let _guard = state.registry_lock.lock().unwrap();
+            let registry = load_registry_unlocked(&app)
+                .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+
             registry.iter()
                 .find(|l| l.id == active_id)
                 .map(|l| l.ingested_hashes.contains(&hash))
@@ -250,9 +254,16 @@ pub async fn ingest_pdfs(
         }
         // raw_chunks dropped here
 
+        // Update registry atomically
         {
+            let _guard = state.registry_lock.lock().unwrap();
+            let mut registry = load_registry_unlocked(&app)
+                .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+
             if let Some(entry) = registry.iter_mut().find(|l| l.id == active_id) {
-                entry.ingested_hashes.push(hash);
+                if !entry.ingested_hashes.contains(&hash) {
+                    entry.ingested_hashes.push(hash);
+                }
                 entry.chunk_count      += file_chunks_done;
                 entry.has_been_ingested = true;
 
@@ -261,11 +272,10 @@ pub async fn ingest_pdfs(
                     entry.model_id = Some(active_model_id.clone());
                 }
             }
-        }
 
-        save_registry(&app, &registry)
-            .await
-            .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+            save_registry_unlocked(&app, &registry)
+                .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+        }
     }
 
     // Rebuild the vector index after all files are stored

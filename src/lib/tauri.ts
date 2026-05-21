@@ -172,3 +172,8 @@ export function onIngestProgress(
 ): Promise<UnlistenFn> {
   return listen<IngestProgress>("ingest:progress", (e) => handler(e.payload));
 }
+
+// ── Updater ───────────────────────────────────────────────────────────────────
+
+export { check as checkForUpdates } from "@tauri-apps/plugin-updater";
+

@@ -33,9 +33,8 @@ pub struct LibraryMeta {
 
 // ── Registry helpers ──────────────────────────────────────────────────────────
 
-/// Load the library registry from `{app_config_dir}/libraries.json`.
-/// Returns an empty Vec if the file does not exist yet.
-pub async fn load_registry(app: &AppHandle) -> anyhow::Result<Vec<LibraryEntry>> {
+/// Load the library registry from `{app_config_dir}/libraries.json` without acquiring a lock.
+pub fn load_registry_unlocked(app: &AppHandle) -> anyhow::Result<Vec<LibraryEntry>> {
     let path = app
         .path()
         .app_config_dir()?
@@ -43,21 +42,42 @@ pub async fn load_registry(app: &AppHandle) -> anyhow::Result<Vec<LibraryEntry>>
     if !path.exists() {
         return Ok(vec![]);
     }
-    let raw = tokio::fs::read_to_string(&path).await?;
+    let raw = std::fs::read_to_string(&path)?;
     Ok(serde_json::from_str(&raw)?)
 }
 
-/// Persist the library registry to `{app_config_dir}/libraries.json`.
-pub async fn save_registry(app: &AppHandle, entries: &[LibraryEntry]) -> anyhow::Result<()> {
+/// Persist the library registry to `{app_config_dir}/libraries.json` without acquiring a lock.
+pub fn save_registry_unlocked(app: &AppHandle, entries: &[LibraryEntry]) -> anyhow::Result<()> {
     let path = app
         .path()
         .app_config_dir()?
         .join("libraries.json");
     if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
+        std::fs::create_dir_all(parent)?;
     }
-    tokio::fs::write(&path, serde_json::to_string_pretty(entries)?).await?;
+    std::fs::write(&path, serde_json::to_string_pretty(entries)?)?;
     Ok(())
+}
+
+/// Load the library registry from `{app_config_dir}/libraries.json`.
+/// Returns an empty Vec if the file does not exist yet.
+pub fn load_registry(app: &AppHandle) -> anyhow::Result<Vec<LibraryEntry>> {
+    let state_opt = app.try_state::<AppState>();
+    let _guard = match &state_opt {
+        Some(state) => Some(state.registry_lock.lock().unwrap()),
+        None => None,
+    };
+    load_registry_unlocked(app)
+}
+
+/// Persist the library registry to `{app_config_dir}/libraries.json`.
+pub fn save_registry(app: &AppHandle, entries: &[LibraryEntry]) -> anyhow::Result<()> {
+    let state_opt = app.try_state::<AppState>();
+    let _guard = match &state_opt {
+        Some(state) => Some(state.registry_lock.lock().unwrap()),
+        None => None,
+    };
+    save_registry_unlocked(app, entries)
 }
 
 /// Save metadata to `library.json` inside the library folder.
@@ -84,7 +104,6 @@ pub async fn load_library_meta(path: &str) -> anyhow::Result<Option<LibraryMeta>
 #[tauri::command]
 pub async fn list_libraries(app: AppHandle) -> Result<Vec<LibraryEntry>, AppError> {
     load_registry(&app)
-        .await
         .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })
 }
 
@@ -100,6 +119,7 @@ pub async fn create_library(
     path:   String,
     preset: ChunkPreset,
     app:    AppHandle,
+    state:  State<'_, AppState>,
 ) -> Result<LibraryEntry, AppError> {
     // Create the LanceDB directory and empty table to validate the path early.
     // Each library gets its own named subfolder so multiple libraries can
@@ -128,15 +148,16 @@ pub async fn create_library(
         model_id:          None,
     };
 
-    let mut registry = load_registry(&app)
-        .await
-        .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+    {
+        let _guard = state.registry_lock.lock().unwrap();
+        let mut registry = load_registry_unlocked(&app)
+            .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
 
-    registry.push(entry.clone());
+        registry.push(entry.clone());
 
-    save_registry(&app, &registry)
-        .await
-        .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+        save_registry_unlocked(&app, &registry)
+            .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+    }
 
     // Save metadata to the library folder as well for portability
     save_library_meta(&db_path, &LibraryMeta {
@@ -160,6 +181,7 @@ pub async fn open_existing_library(
     path:   String,
     preset: ChunkPreset,
     app:    AppHandle,
+    state:  State<'_, AppState>,
 ) -> Result<LibraryEntry, AppError> {
     let lance_dir = std::path::Path::new(&path).join("chunks.lance");
     if !lance_dir.exists() {
@@ -188,18 +210,6 @@ pub async fn open_existing_library(
         .await
         .map_err(|e| AppError { code: "LANCEDB".into(), message: e.to_string() })?;
 
-    // Guard: don't register the same path twice.
-    let mut registry = load_registry(&app)
-        .await
-        .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
-
-    if registry.iter().any(|l| l.path == path) {
-        return Err(AppError {
-            code:    "ALREADY_REGISTERED".into(),
-            message: "This library is already in your list.".into(),
-        });
-    }
-
     let recovered_preset = meta.as_ref().map(|m| m.chunk_preset.clone()).unwrap_or(preset);
 
     let entry = LibraryEntry {
@@ -214,10 +224,22 @@ pub async fn open_existing_library(
         model_id:          recovered_model,
     };
 
-    registry.push(entry.clone());
-    save_registry(&app, &registry)
-        .await
-        .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+    {
+        let _guard = state.registry_lock.lock().unwrap();
+        let mut registry = load_registry_unlocked(&app)
+            .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+
+        if registry.iter().any(|l| l.path == path) {
+            return Err(AppError {
+                code:    "ALREADY_REGISTERED".into(),
+                message: "This library is already in your list.".into(),
+            });
+        }
+
+        registry.push(entry.clone());
+        save_registry_unlocked(&app, &registry)
+            .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+    }
 
     Ok(entry)
 }
@@ -233,7 +255,6 @@ pub async fn open_library(
     app:   AppHandle,
 ) -> Result<(), AppError> {
     let registry = load_registry(&app)
-        .await
         .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
 
     let entry = registry
@@ -264,23 +285,7 @@ pub async fn delete_library(
     state: State<'_, AppState>,
     app:   AppHandle,
 ) -> Result<(), AppError> {
-    let mut registry = load_registry(&app)
-        .await
-        .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
-
-    let pos = registry
-        .iter()
-        .position(|l| l.id == id)
-        .ok_or(AppError {
-            code:    "LIB_NOT_FOUND".into(),
-            message: format!("No library with id '{id}' found in registry."),
-        })?;
-
-    let _entry = registry.remove(pos);
-
-    // Files are intentionally left on disk — only the registry entry is removed.
-
-    // If this was the active library, clear the state.
+    // If this was the active library, clear the state first.
     let is_active = state
         .active_library_id
         .read()
@@ -293,9 +298,24 @@ pub async fn delete_library(
         *state.active_library_id.write().await = None;
     }
 
-    save_registry(&app, &registry)
-        .await
-        .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+    {
+        let _guard = state.registry_lock.lock().unwrap();
+        let mut registry = load_registry_unlocked(&app)
+            .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+
+        let pos = registry
+            .iter()
+            .position(|l| l.id == id)
+            .ok_or(AppError {
+                code:    "LIB_NOT_FOUND".into(),
+                message: format!("No library with id '{id}' found in registry."),
+            })?;
+
+        registry.remove(pos);
+
+        save_registry_unlocked(&app, &registry)
+            .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+    }
 
     Ok(())
 }
@@ -310,12 +330,13 @@ pub async fn set_library_preset(
     id:     String,
     preset: ChunkPreset,
     app:    AppHandle,
+    state:  State<'_, AppState>,
 ) -> Result<(), AppError> {
-    let mut registry = load_registry(&app)
-        .await
-        .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
-
     let (path, meta) = {
+        let _guard = state.registry_lock.lock().unwrap();
+        let mut registry = load_registry_unlocked(&app)
+            .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+
         let entry = registry
             .iter_mut()
             .find(|l| l.id == id)
@@ -325,15 +346,17 @@ pub async fn set_library_preset(
             })?;
 
         entry.chunk_preset = preset;
-        (entry.path.clone(), LibraryMeta {
+        let path = entry.path.clone();
+        let meta = LibraryMeta {
             chunk_preset: entry.chunk_preset.clone(),
             model_id:     entry.model_id.clone(),
-        })
-    };
+        };
 
-    save_registry(&app, &registry)
-        .await
-        .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+        save_registry_unlocked(&app, &registry)
+            .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+
+        (path, meta)
+    };
 
     // Update metadata on disk
     save_library_meta(&path, &meta)
@@ -352,12 +375,13 @@ pub async fn set_library_model(
     id:       String,
     model_id: String,
     app:      AppHandle,
+    state:    State<'_, AppState>,
 ) -> Result<(), AppError> {
-    let mut registry = load_registry(&app)
-        .await
-        .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
-
     let (path, meta) = {
+        let _guard = state.registry_lock.lock().unwrap();
+        let mut registry = load_registry_unlocked(&app)
+            .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+
         let entry = registry
             .iter_mut()
             .find(|l| l.id == id)
@@ -374,15 +398,17 @@ pub async fn set_library_model(
         }
 
         entry.model_id = Some(model_id);
-        (entry.path.clone(), LibraryMeta {
+        let path = entry.path.clone();
+        let meta = LibraryMeta {
             chunk_preset: entry.chunk_preset.clone(),
             model_id:     entry.model_id.clone(),
-        })
-    };
+        };
 
-    save_registry(&app, &registry)
-        .await
-        .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+        save_registry_unlocked(&app, &registry)
+            .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+
+        (path, meta)
+    };
 
     // Update metadata on disk
     save_library_meta(&path, &meta)
@@ -402,10 +428,13 @@ pub async fn set_library_model(
 pub async fn list_ingested_files(
     library_id: String,
     app:        AppHandle,
+    state:      State<'_, AppState>,
 ) -> Result<Vec<IngestedFile>, AppError> {
-    let registry = load_registry(&app)
-        .await
-        .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?;
+    let registry = {
+        let _guard = state.registry_lock.lock().unwrap();
+        load_registry_unlocked(&app)
+            .map_err(|e| AppError { code: "REGISTRY".into(), message: e.to_string() })?
+    };
 
     let entry = registry
         .iter()
